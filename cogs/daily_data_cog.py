@@ -79,5 +79,5 @@ class DailyDataCog(commands.Cog):
     async def daily(self, ctx):
         await ctx.send(str(self.daily_data.daily_deal))
 
-def setup(bot):
-    bot.add_cog(DailyDataCog(bot))
+async def setup(bot):
+    await bot.add_cog(DailyDataCog(bot))
