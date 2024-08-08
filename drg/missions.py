@@ -2,23 +2,21 @@ from typing import List
 from datetime import datetime, timezone, timedelta
 import requests
 import pandas as pd
-import numpy as np
 import json
 
-domain_url = 'https://doublexp.net'
-uniquely_identifying_cols = ['Season', 'TimeStamp', 'Mission ID']
+from drg import utils
 
-class DailyData:
+class MissionData:
     def __init__(self):
         today_date = datetime.now(timezone.utc).date()
         
         today_date_str = today_date.strftime('%Y-%m-%d')
-        today_url = f'{domain_url}/static/json/bulkmissions/{today_date_str}.json'
+        today_url = f'{utils.DOMAIN_URL}/static/json/bulkmissions/{today_date_str}.json'
         today_r = requests.get(today_url)
         today_data_json = json.loads(today_r.content)
         
         tmr_date_str = (today_date + timedelta(days=1)).strftime('%Y-%m-%d')
-        tmr_url = f'{domain_url}/static/json/bulkmissions/{tmr_date_str}.json'
+        tmr_url = f'{utils.DOMAIN_URL}/static/json/bulkmissions/{tmr_date_str}.json'
         tmr_r = requests.get(tmr_url)
         tmr_data_json = json.loads(tmr_r.content)
 
@@ -82,7 +80,7 @@ class Missions:
         self.missions = missions_df
     
     def __str__(self):
-        num_missions = self.missions.groupby(uniquely_identifying_cols).ngroups
+        num_missions = self.missions.groupby(utils.UNIQUELY_IDENTIFYING_COLUMNS).ngroups
 
         if num_missions == 0:
             return 'No missions found :pensive:'
@@ -137,26 +135,26 @@ class Missions:
     def filter_double_warning(self):
         warnings_per_mission = (
             self.missions
-            .groupby(uniquely_identifying_cols)
+            .groupby(utils.UNIQUELY_IDENTIFYING_COLUMNS)
             .agg(NumWarnings=pd.NamedAgg(column='Warning', aggfunc='count'))
         )
         double_warning_missions = warnings_per_mission[warnings_per_mission['NumWarnings'] == 2]
 
         return Missions(self.missions.join(
             double_warning_missions.drop(columns='NumWarnings'),
-            on=uniquely_identifying_cols,
+            on=utils.UNIQUELY_IDENTIFYING_COLUMNS,
             how='inner'
         ))
     
     def head(self, n: int = 5):
-        unique_missions = self.missions[uniquely_identifying_cols].drop_duplicates()
+        unique_missions = self.missions[utils.UNIQUELY_IDENTIFYING_COLUMNS].drop_duplicates()
         first_n_missions = (
             unique_missions
-            .set_index(uniquely_identifying_cols)
-            .sort_values(by=uniquely_identifying_cols)
+            .set_index(utils.UNIQUELY_IDENTIFYING_COLUMNS)
+            .sort_values(by=utils.UNIQUELY_IDENTIFYING_COLUMNS)
             .head(n)
         )
-        return Missions(self.missions.join(first_n_missions, on=uniquely_identifying_cols, how='inner'))
+        return Missions(self.missions.join(first_n_missions, on=utils.UNIQUELY_IDENTIFYING_COLUMNS, how='inner'))
     
     def to_markdown(self, drop_cols: List = None):
         if len(self.missions.index) == 0:
@@ -167,16 +165,16 @@ class Missions:
         mission_warnings = (
             self.missions
             .fillna('N/A')
-            .groupby(uniquely_identifying_cols)
+            .groupby(utils.UNIQUELY_IDENTIFYING_COLUMNS)
             .agg({'Mutator': 'first', 'Warning': lambda w: ', '.join(w.tolist())})
             .rename(columns={'Warning': 'Warning(s)'})
         )
         missions_for_md = (
             self.missions
             .drop(columns=['Mutator', 'Warning'])
-            .drop_duplicates(uniquely_identifying_cols)
-            .join(mission_warnings, on=uniquely_identifying_cols)
-            .sort_values(by=uniquely_identifying_cols)
+            .drop_duplicates(utils.UNIQUELY_IDENTIFYING_COLUMNS)
+            .join(mission_warnings, on=utils.UNIQUELY_IDENTIFYING_COLUMNS)
+            .sort_values(by=utils.UNIQUELY_IDENTIFYING_COLUMNS)
             .drop(columns=drop_cols)
         )
 

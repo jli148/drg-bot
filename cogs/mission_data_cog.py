@@ -1,7 +1,7 @@
 from discord.ext import tasks, commands
-from drg import daily_data
+from drg import missions
 
-class DailyDataCog(commands.Cog):
+class MissionDataCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.daily_data = None
@@ -12,7 +12,7 @@ class DailyDataCog(commands.Cog):
     
     @tasks.loop(hours=24)
     async def refresh_daily_data(self):
-        self.daily_data = daily_data.DailyData()
+        self.daily_data = missions.MissionData()
     
     @commands.command()
     async def current(self, ctx, season: str = 's0'):
@@ -80,4 +80,4 @@ class DailyDataCog(commands.Cog):
         await ctx.send(str(self.daily_data.daily_deal))
 
 async def setup(bot):
-    await bot.add_cog(DailyDataCog(bot))
+    await bot.add_cog(MissionDataCog(bot))
