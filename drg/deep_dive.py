@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 import requests
 import json
 
-domain_url = 'https://doublexp.net'
+from drg import utils
 
 DEEP_DIVE_REFRESH_DAY = 3
 DEEP_DIVE_REFRESH_HOUR = 11
@@ -15,7 +15,7 @@ class DeepDiveData:
         if refresh_time > time_now:
             refresh_time = refresh_time - timedelta(weeks=1)
 
-        url = f'{domain_url}/static/json/DD_{refresh_time.strftime("%Y-%m-%dT%H-%M-%SZ")}.json'
+        url = f'{utils.DOMAIN_URL}/static/json/DD_{refresh_time.strftime("%Y-%m-%dT%H-%M-%SZ")}.json'
         r = requests.get(url)
         data = json.loads(r.content)
 
