@@ -1,24 +1,20 @@
-from typing import List
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 import requests
 import pandas as pd
 import json
 
-from drg import utils
+import drg.utils
 
 class MissionData:
     def __init__(self):
         today_date = datetime.now(timezone.utc).date()
         
         today_date_str = today_date.strftime('%Y-%m-%d')
-        today_url = f'{utils.DOMAIN_URL}/static/json/bulkmissions/{today_date_str}.json'
-        today_r = requests.get(today_url)
-        today_data_json = json.loads(today_r.content)
+        today_data_json = fetch_missions_json(today_date_str)
         
         tmr_date_str = (today_date + timedelta(days=1)).strftime('%Y-%m-%d')
-        tmr_url = f'{utils.DOMAIN_URL}/static/json/bulkmissions/{tmr_date_str}.json'
-        tmr_r = requests.get(tmr_url)
-        tmr_data_json = json.loads(tmr_r.content)
+        tmr_data_json = fetch_missions_json(tmr_date_str)
 
         mission_data_json = (
             {k: v for k, v in today_data_json.items() if k.startswith(today_date_str)}
@@ -28,13 +24,16 @@ class MissionData:
         
         self.date = today_date
         self.missions = Missions(standardize_cols(pd.concat(missions_by_time)))
-        self.daily_deal = DailyDeal(today_data_json['dailyDeal'])
-    
-    def check_if_expired(self):
-        current_date = datetime.now(timezone.utc).date()
-        return (self.date != current_date)
+        self.daily_deal = DailyDeal.from_json(today_data_json['dailyDeal'])
 
-def missions_json_to_df(missions_json: dict):
+def fetch_missions_json(date_str: str) -> dict:
+    url = f'{drg.utils.DOMAIN_URL}/static/json/bulkmissions/{date_str}.json'
+    r = requests.get(url)
+    data_json = json.loads(r.content)
+
+    return data_json
+
+def missions_json_to_df(missions_json: dict) -> pd.DataFrame:
     missions_list = []
     for biome, biome_missions in missions_json['Biomes'].items():
         biome_missions_df = pd.json_normalize(biome_missions)
@@ -51,24 +50,12 @@ def missions_json_to_df(missions_json: dict):
 
     return missions
 
-def standardize_cols(missions: pd.DataFrame):
+def standardize_cols(missions: pd.DataFrame) -> pd.DataFrame:
     std_missions = (
         missions
         .explode('included_in')
         .rename(columns={'included_in': 'Season'})
-        .explode('MissionWarnings')
-        .rename(columns={
-            'Biome': 'Biome',
-            'PrimaryObjective': 'Primary',
-            'SecondaryObjective': 'Secondary',
-            'Complexity': 'Complexity',
-            'Length': 'Length',
-            'CodeName': 'Code Name',
-            'Season': 'Season',
-            'id': 'Mission ID',
-            'MissionMutator': 'Mutator',
-            'MissionWarnings': 'Warning'
-        })
+        .reset_index()
     )
     std_missions['Complexity'] = pd.to_numeric(std_missions['Complexity'])
     std_missions['Length'] = pd.to_numeric(std_missions['Length'])
@@ -79,135 +66,145 @@ class Missions:
     def __init__(self, missions_df: pd.DataFrame):
         self.missions = missions_df
     
-    def __str__(self):
-        num_missions = self.missions.groupby(utils.UNIQUELY_IDENTIFYING_COLUMNS).ngroups
-
-        if num_missions == 0:
-            return 'No missions found :pensive:'
-
-        biomes = self.missions['Biome'].unique().tolist()
-        mutators = self.missions['Mutator'].dropna().unique().tolist()
-        warnings = self.missions['Warning'].dropna().unique().tolist()
-
-        return (
-            f'* {num_missions} missions in range\n'
-            f'* Biomes in range: {", ".join(biomes)}\n'
-            f'* Unique mutators: {", ".join(mutators) if mutators else "None"}\n'
-            f'* Unique warnings: {", ".join(warnings) if warnings else "None"}\n'
-        )
-    
-    def exclude_past_missions(self):
+    def exclude_past_missions(self) -> 'Missions':
         time_now = datetime.now(timezone.utc)
         timestamp = round_down_30_min(time_now)
 
         return Missions(self.missions[self.missions['TimeStamp'] >= timestamp])
     
-    def filter_current_missions(self):
+    def filter_current_missions(self) -> 'Missions':
         time_now = datetime.now(timezone.utc)
         timestamp = round_down_30_min(time_now)
 
         return Missions(self.missions[self.missions['TimeStamp'] == timestamp])
     
-    def filter_upcoming_missions(self):
+    def filter_upcoming_missions(self) -> 'Missions':
         time_upcoming = datetime.now(timezone.utc) + timedelta(minutes=30)
         timestamp = round_down_30_min(time_upcoming)
 
         return Missions(self.missions[self.missions['TimeStamp'] == timestamp])
     
-    def filter_season(self, season: str):
+    def filter_season(self, season: str) -> 'Missions':
         return Missions(self.missions[self.missions['Season'] == season])
     
-    def filter_biome(self, biome: str):
+    def filter_biome(self, biome: str) -> 'Missions':
         return Missions(self.missions[self.missions['Biome'] == biome])
     
-    def filter_primary(self, primary: str):
-        return Missions(self.missions[self.missions['Primary'] == primary])
+    def filter_primary(self, primary: str) -> 'Missions':
+        return Missions(self.missions[self.missions['PrimaryObjective'] == primary])
     
-    def filter_secondary(self, secondary: str):
-        return Missions(self.missions[self.missions['Secondary'] == secondary])
+    def filter_secondary(self, secondary: str) -> 'Missions':
+        return Missions(self.missions[self.missions['SecondaryObjective'] == secondary])
     
-    def filter_mutator(self, mutator: str):
-        return Missions(self.missions[self.missions['Mutator'] == mutator])
+    def filter_mutator(self, mutator: str) -> 'Missions':
+        return Missions(self.missions[self.missions['MissionMutator'] == mutator])
     
-    def filter_warning(self, warning: str):
-        return Missions(self.missions[self.missions['Warning'] == warning])
+    def filter_warning(self, warning: str) -> 'Missions':
+        missions_w_any_warning = self.missions.dropna(subset=['MissionWarnings'])
+        has_warning = missions_w_any_warning['MissionWarnings'].apply(lambda x: warning in x)
+        return Missions(missions_w_any_warning[has_warning])
     
-    def filter_double_warning(self):
-        warnings_per_mission = (
-            self.missions
-            .groupby(utils.UNIQUELY_IDENTIFYING_COLUMNS)
-            .agg(NumWarnings=pd.NamedAgg(column='Warning', aggfunc='count'))
-        )
-        double_warning_missions = warnings_per_mission[warnings_per_mission['NumWarnings'] == 2]
+    def filter_double_warning(self) -> 'Missions':
+        missions_w_any_warning = self.missions.dropna(subset=['MissionWarnings'])
+        is_double_warning = (missions_w_any_warning['MissionWarnings'].str.len() == 2)
+        return Missions(missions_w_any_warning[is_double_warning])
+    
+    def head(self, n: int = 5) -> 'Missions':
+        return Missions(self.missions.head(n))
 
-        return Missions(self.missions.join(
-            double_warning_missions.drop(columns='NumWarnings'),
-            on=utils.UNIQUELY_IDENTIFYING_COLUMNS,
-            how='inner'
-        ))
+    def tolist(self) -> list['Mission']:
+        return self.missions.apply(Mission.from_row, axis=1).tolist()
     
-    def head(self, n: int = 5):
-        unique_missions = self.missions[utils.UNIQUELY_IDENTIFYING_COLUMNS].drop_duplicates()
-        first_n_missions = (
-            unique_missions
-            .set_index(utils.UNIQUELY_IDENTIFYING_COLUMNS)
-            .sort_values(by=utils.UNIQUELY_IDENTIFYING_COLUMNS)
-            .head(n)
-        )
-        return Missions(self.missions.join(first_n_missions, on=utils.UNIQUELY_IDENTIFYING_COLUMNS, how='inner'))
+    def to_bullets(self, n: int = drg.utils.MAX_MISSION_DISPLAY) -> drg.utils.Bullet:
+        mission_list = self.missions.head(n).apply(Mission.from_row, axis=1)
+        return (m.to_bullets() for m in mission_list)
     
-    def to_markdown(self, drop_cols: List = None):
-        if len(self.missions.index) == 0:
+    def __str__(self):
+        num_missions = len(self.missions.index)
+        if num_missions == 0:
             return 'No missions found :pensive:'
-        if not drop_cols:
-            drop_cols = []
+        
+        txt = ''.join(drg.utils.bullets_to_str(b) for b in self.to_bullets())
+        if num_missions > drg.utils.MAX_MISSION_DISPLAY:
+            txt += f'...and {num_missions - drg.utils.MAX_MISSION_DISPLAY} more missions'
 
-        mission_warnings = (
-            self.missions
-            .fillna('N/A')
-            .groupby(utils.UNIQUELY_IDENTIFYING_COLUMNS)
-            .agg({'Mutator': 'first', 'Warning': lambda w: ', '.join(w.tolist())})
-            .rename(columns={'Warning': 'Warning(s)'})
-        )
-        missions_for_md = (
-            self.missions
-            .drop(columns=['Mutator', 'Warning'])
-            .drop_duplicates(utils.UNIQUELY_IDENTIFYING_COLUMNS)
-            .join(mission_warnings, on=utils.UNIQUELY_IDENTIFYING_COLUMNS)
-            .sort_values(by=utils.UNIQUELY_IDENTIFYING_COLUMNS)
-            .drop(columns=drop_cols)
-        )
+        return txt
 
-        if 'TimeStamp' not in drop_cols:
-            missions_for_md['Time Until Mission'] = missions_for_md['TimeStamp'].apply(
-                lambda t: get_time_until_mission(t)
-            )
-            missions_for_md = missions_for_md.drop(columns='TimeStamp')
-
-        return f'```{missions_for_md.to_markdown(index=False)}```'
-
-def round_down_30_min(t: datetime):
+def round_down_30_min(t: datetime) -> datetime:
     return t - timedelta(minutes=t.minute % 30, seconds=t.second, microseconds=t.microsecond)
 
-def get_time_until_mission(timestamp: datetime):
-    delta = round((timestamp - datetime.now(timezone.utc)).total_seconds())
-    delta_h = delta // 3600
-    delta_m = (delta % 3600) // 60
-    delta_s = delta % 60
-
-    return 'Right now!' if delta < 0 else f'{delta_h}h{delta_m}m{delta_s}s'
-
+@dataclass
 class DailyDeal:
-    def __init__(self, deal_json: dict):
-        self.deal_type = deal_json['DealType']
-        self.amt = deal_json['ResourceAmount']
-        self.resource = deal_json['Resource']
-        self.credits = deal_json['Credits']
-        self.change_pct = deal_json['ChangePercent']
+    deal_type: str
+    amt: int
+    resource: str
+    credits: int
+    change_pct: float
+
+    def __post_init__(self):
         self.save_or_profit = 'profit' if self.deal_type == 'Sell' else 'savings'
+
+    @classmethod
+    def from_json(cls, data: dict):
+        return cls(
+            data['DealType'],
+            data['ResourceAmount'],
+            data['Resource'],
+            data['Credits'],
+            data['ChangePercent']
+        )
     
     def __str__(self):
         return (
             f'{self.deal_type} {self.amt} {self.resource} for {self.credits} credits '
             f'({round(self.change_pct)}% {self.save_or_profit}!)'
         )
+
+@dataclass
+class Mission:
+    timestamp: datetime
+    season: str
+    biome: str
+    name: str
+    primary: str
+    secondary: str
+    mutator: str
+    warnings: list[str]
+    length: int
+    complexity: int
+
+    @classmethod
+    def from_row(cls, row: pd.Series):
+        return cls(
+            row['TimeStamp'],
+            row['Season'],
+            row['Biome'],
+            row['CodeName'],
+            row['PrimaryObjective'], row['SecondaryObjective'],
+            row['MissionMutator'],
+            None if pd.isna(row['MissionWarnings']) else row['MissionWarnings'],
+            row['Length'], row['Complexity']
+        )
+
+    def to_bullets(self) -> drg.utils.Bullet:
+        return (
+            f'{self.name} (Time to mission: {get_time_until_mission(self.timestamp)})',
+            (
+                f'Biome: {self.biome}',
+                f'Length {self.length} / Complexity {self.complexity}',
+                f'Primary: {self.primary}',
+                f'Secondary: {self.secondary}',
+                f'Warning(s): {", ".join(self.warnings) if self.warnings else "None"}'
+            )
+        )
+    
+    def __str__(self):
+        return drg.utils.bullets_to_str(self.to_bullets())
+
+def get_time_until_mission(timestamp: datetime) -> tuple[int, int, int]:
+    delta = round((timestamp - datetime.now(timezone.utc)).total_seconds())
+    delta_h = delta // 3600
+    delta_m = (delta % 3600) // 60
+    delta_s = delta % 60
+
+    return 'Right now!' if delta < 0 else f'{delta_h}h{delta_m}m{delta_s}s'
