@@ -43,11 +43,9 @@ class MissionDataCog(commands.Cog):
             .exclude_past_missions()
             .filter_season(season)
             .filter_mutator('Gold Rush')
-            .head()
         )
         
-        msg = gold_rush_missions.to_markdown(drop_cols=['Season', 'Mission ID', 'Mutator'])
-        await ctx.send(msg)
+        await ctx.send(str(gold_rush_missions))
 
     @commands.command()
     async def doublexp(self, ctx, season: str = 's0'):
@@ -56,11 +54,9 @@ class MissionDataCog(commands.Cog):
             .exclude_past_missions()
             .filter_season(season)
             .filter_mutator('Double XP')
-            .head()
         )
         
-        msg = double_xp_missions.to_markdown(drop_cols=['Season', 'Mission ID', 'Mutator'])
-        await ctx.send(msg)
+        await ctx.send(str(double_xp_missions))
 
     @commands.command()
     async def primary(self, ctx, primary, season: str = 's0'):
@@ -69,11 +65,9 @@ class MissionDataCog(commands.Cog):
             .exclude_past_missions()
             .filter_season(season)
             .filter_primary(primary)
-            .head()
         )
 
-        msg = missions_with_primary.to_markdown(drop_cols=['Season', 'Mission ID', 'Primary'])
-        await ctx.send(msg)
+        await ctx.send(str(missions_with_primary))
 
     @commands.command()
     async def daily(self, ctx):
